@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Retail Chatbot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    #messages { max-height: 420px; overflow-y: auto; }
+  </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+
+  <div class="w-96 bg-white shadow-xl rounded-xl flex flex-col overflow-hidden">
+    <div class="bg-blue-600 text-white p-3 font-semibold rounded-t-xl">Retail Assistant</div>
+
+    <div id="messages" class="flex-1 p-3 space-y-2 bg-gray-50"></div>
+
+    <div class="flex border-t">
+      <input id="userInput" class="flex-1 p-3 outline-none" placeholder="Type a message..." />
+      <button id="sendBtn" class="bg-blue-600 text-white px-4 hover:bg-blue-700">Send</button>
+    </div>
+  </div>
+
+  <script>
+    // small helper: safe-check for names (reject common words)
+    const rejectNamePatterns = ["hi","hello","hey","order","return","shipping","where","what","who","when","why","help","human","thanks","thank","ok","bye","yes","no","bro","?",".",","];
+
+    function addMessage(msg, sender) {
+      const messagesDiv = document.getElementById("messages");
+      const wrapper = document.createElement("div");
+      wrapper.className = sender === "user" ? "flex justify-end" : "flex justify-start";
+      const bubble = document.createElement("div");
+      bubble.className = sender === "user" ? "bg-blue-500 text-white p-2 rounded-xl max-w-xs break-words" : "bg-gray-200 text-gray-800 p-2 rounded-xl max-w-xs break-words";
+      bubble.innerText = msg;
+      wrapper.appendChild(bubble);
+      messagesDiv.appendChild(wrapper);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // Safety filter (client-side) - list of words/phrases that should trigger safe fallback
+    const unsafePatterns = [
+      "sex","fuck","bang","porn","nude","naked","dick","pussy","suck","f**k","i'd bang"
+    ];
+
+    function looksUnsafe(text) {
+      if(!text) return false;
+      const t = text.toLowerCase();
+      return unsafePatterns.some(p => t.includes(p));
+    }
+
+    // Always start by asking for name (force onboarding)
+    window.onload = function() {
+      // force fresh onboarding: clear awaiting flag and remove saved name so onboarding always occurs
+      localStorage.removeItem("user_name");
+      localStorage.setItem("awaiting_name", "true");
+      addMessage("Hi! I'm your retail assistant. What's your name?", "bot");
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById("userInput");
+      let msg = input.value.trim();
+      if(!msg) return;
+
+      const awaitingName = localStorage.getItem("awaiting_name");
+
+      // If waiting for name, validate it's a likely name before accepting
+      if(awaitingName) {
+        const lower = msg.toLowerCase();
+        // reject short or common words/greetings as name
+        if(msg.length < 2 || rejectNamePatterns.includes(lower) || /^[0-9\W]+$/.test(msg)) {
+          addMessage(msg, "user");
+          addMessage("That doesn't look like a name. Please tell me your name (e.g., 'Madhu').", "bot");
+          input.value = "";
+          return;
+        }
+
+        // accept as name
+        localStorage.setItem("user_name", msg);
+        localStorage.removeItem("awaiting_name");
+        addMessage(msg, "user");
+        addMessage(`Nice to meet you, ${msg}! How can I help you today?`, "bot");
+        input.value = "";
+        return;
+      }
+
+      // Normal chat flow
+      addMessage(msg, "user");
+
+      // Send to backend
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        let botText = data.response || "Sorry, something went wrong.";
+
+        // Client-side safety check: if backend response looks unsafe, replace and trigger handoff
+        if (looksUnsafe(botText)) {
+          botText = "Sorry, I can't help with that. Would you like me to connect you with a human agent?";
+          // open Tawk.to after showing this
+          addMessage(botText, "bot");
+          input.value = "";
+          // open human chat
+          setTimeout(()=> {
+            Tawk_API = Tawk_API || {};
+            try { Tawk_API.maximize(); } catch(e){/*ignore*/ }
+          }, 400);
+          return;
+        }
+
+        addMessage(botText, "bot");
+
+        // If backend explicitly requested human, open Tawk.to
+        if(botText.toLowerCase().includes("human") || botText.toLowerCase().includes("connect you to a human")) {
+          Tawk_API = Tawk_API || {};
+          try { Tawk_API.maximize(); } catch(e){/*ignore*/ }
+        }
+
+      } catch (err) {
+        addMessage("Sorry, server error. Try again.", "bot");
+      }
+
+      input.value = "";
+    }
+
+    // send on click or Enter
+    document.getElementById("sendBtn").addEventListener("click", sendMessage);
+    document.getElementById("userInput").addEventListener("keydown", function(e) {
+      if(e.key === "Enter") sendMessage();
+    });
+  </script>
+
+  <!-- Tawk.to embed -->
+  <script type="text/javascript">
+    var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
+    (function(){
+      var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
+      s1.async=true;
+      s1.src='https://embed.tawk.to/68db6f3649400919536612de/1j6cikrs5';
+      s1.charset='UTF-8';
+      s1.setAttribute('crossorigin','*');
+      s0.parentNode.insertBefore(s1,s0);
+    })();
+  </script>
+
+</body>
+</html>
